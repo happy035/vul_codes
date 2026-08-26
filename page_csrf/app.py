@@ -1,9 +1,10 @@
 import sqlite3
 import os
+import secrets
 from flask import Flask, request, render_template, redirect, url_for, session, flash
 
 app = Flask(__name__)
-app.secret_key = "super-secret-key-for-csrf-demo"
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.environ.get("SECRET_KEY") or secrets.token_hex(32)
 DB_FILE = "csrf_demo.db"
 
 
@@ -58,6 +59,17 @@ def update_email(username, new_email):
     conn.close()
 
 
+@app.before_request
+def ensure_csrf_token():
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(16)
+
+
+@app.context_processor
+def inject_csrf_token():
+    return dict(csrf_token=session.get("csrf_token"))
+
+
 @app.route("/", methods=["GET"])
 def index():
     if "username" in session:
@@ -85,6 +97,7 @@ def login():
 @app.route("/logout", methods=["GET"])
 def logout():
     session.pop("username", None)
+    session.pop("csrf_token", None)
     flash("로그아웃되었습니다.", "info")
     return redirect(url_for("login"))
 
@@ -112,6 +125,11 @@ def change_password():
         flash("로그인이 필요합니다.", "warning")
         return redirect(url_for("login"))
 
+    token = request.form.get("csrf_token")
+    if not token or token != session.get("csrf_token"):
+        flash("CSRF 토큰이 누락되었거나 유효하지 않습니다.", "danger")
+        return redirect(url_for("profile"))
+
     new_password = request.form.get("new_password", "").strip()
     if new_password:
         update_password(session["username"], new_password)
@@ -127,6 +145,11 @@ def change_email():
     if "username" not in session:
         flash("로그인이 필요합니다.", "warning")
         return redirect(url_for("login"))
+
+    token = request.form.get("csrf_token")
+    if not token or token != session.get("csrf_token"):
+        flash("CSRF 토큰이 누락되었거나 유효하지 않습니다.", "danger")
+        return redirect(url_for("profile"))
 
     new_email = request.form.get("new_email", "").strip()
     if new_email:
