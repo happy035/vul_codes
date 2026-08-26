@@ -33,19 +33,17 @@ def init_db():
 
 def authenticate_user_vulnerable(username, password):
     """
-    [취약한 인증 모듈] - CWE-89: SQL Injection
-    사용자 입력값(username, password)을 검증이나 파라미터 바인딩 없이
-    문자열 포맷팅(f-string)으로 쿼리에 직접 결합하여 취약점이 발생합니다.
+    [취약한 인증 모듈] - CWE-89: SQL Injection 방지를 위해 매개변수화된 쿼리 사용으로 수정됨
     """
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
 
-    # VULNERABLE: 직접 문자열 연결을 통한 SQL 생성
-    query = f"SELECT * FROM users WHERE username = '{username}' AND password = '{password}'"
-    print(f"[*] Executing Raw SQL Query: {query}")
+    # SECURE: 파라미터 바인딩 적용
+    query = "SELECT * FROM users WHERE username = ? AND password = ?"
+    print(f"[*] Executing Parameterized SQL Query: {query}")
 
     try:
-        cursor.execute(query)
+        cursor.execute(query, (username, password))
         user = cursor.fetchone()
     except sqlite3.Error as e:
         print(f"[!] Database Error: {e}")
@@ -83,8 +81,8 @@ def login():
     username = request.form.get("username", "")
     password = request.form.get("password", "")
 
-    # 취약한 인증 함수 호출
-    user, executed_query = authenticate_user_vulnerable(username, password)
+    # 안전한 인증 함수 호출
+    user, executed_query = authenticate_user_secure(username, password)
 
     if user:
         # 로그인 성공
