@@ -40,6 +40,28 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
       # ----------------------------------------------------------------------
+      # 0. 빌드 도구 및 언어 런타임 설정 (GCC/G++, Python, 의존성 설치)
+      # ----------------------------------------------------------------------
+      - name: Set up GCC & Build Toolchains
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y build-essential gcc g++
+          echo "=== GCC Version ==="
+          gcc --version
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python Dependencies (requirements.txt)
+        run: |
+          python -m pip install --upgrade pip
+          echo "=== Installing dependencies from requirements.txt ==="
+          find . -name "requirements.txt" -type f -exec python -m pip install -r {} +
+          pip list
+
+      # ----------------------------------------------------------------------
       # 1. Google Cloud 인증 및 Cloud SDK 설정
       # ----------------------------------------------------------------------
       - name: Authenticate to Google Cloud
