@@ -5,6 +5,8 @@ from flask import Flask, request, render_template, redirect, url_for, session, f
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.environ.get("SECRET_KEY") or secrets.token_hex(32)
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
 DB_FILE = "csrf_demo.db"
 
 
@@ -85,7 +87,9 @@ def login():
 
         user = get_user_by_username(username)
         if user and user[2] == password:
+            session.clear()
             session["username"] = username
+            session["csrf_token"] = secrets.token_hex(16)
             flash("로그인에 성공했습니다!", "success")
             return redirect(url_for("profile"))
         else:
