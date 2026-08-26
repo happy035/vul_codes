@@ -40,25 +40,21 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
       # ----------------------------------------------------------------------
-      # 0. 빌드 도구 및 언어 런타임 설정 (GCC/G++, Python, 의존성 설치)
+      # 0. Python 빌드 환경 및 의존성 설정
       # ----------------------------------------------------------------------
-      - name: Set up GCC & Build Toolchains
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y build-essential gcc g++
-          echo "=== GCC Version ==="
-          gcc --version
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: '**/requirements.txt'
 
       - name: Install Python Dependencies (requirements.txt)
         run: |
           python -m pip install --upgrade pip
           echo "=== Installing dependencies from requirements.txt ==="
           find . -name "requirements.txt" -type f -exec python -m pip install -r {} +
+          echo "=== Installed Python Packages ==="
           pip list
 
       # ----------------------------------------------------------------------
