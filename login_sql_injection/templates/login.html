@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQL Injection Demo - Login</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f4f6f9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .login-card {
+            max-width: 500px;
+            width: 100%;
+            background: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            padding: 30px;
+        }
+        .code-box {
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            padding: 12px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 0.88rem;
+            word-break: break-all;
+        }
+        .badge-cwe {
+            background-color: #dc3545;
+            color: white;
+            font-size: 0.75rem;
+        }
+    </style>
+</head>
+<body>
+
+<div class="login-card">
+    <div class="text-center mb-4">
+        <span class="badge badge-cwe mb-2">CWE-89: SQL Injection Demo</span>
+        <h3 class="fw-bold">Security Lab Login</h3>
+        <p class="text-muted small">취약한 웹 애플리케이션 로그인 테스트 페이지</p>
+    </div>
+
+    <!-- 결과 알림 메시지 -->
+    {% if message %}
+        <div class="alert alert-{{ status }} alert-dismissible fade show text-center fw-bold" role="alert">
+            {% if status == 'success' %}
+                🎉 {{ message }}
+                {% if user_info %}
+                    <div class="mt-2 text-start small fw-normal">
+                        <strong>Logged in as:</strong> {{ user_info.username }} (Role: <code>{{ user_info.role }}</code>)
+                    </div>
+                {% endif %}
+            {% else %}
+                ⚠️ {{ message }}
+            {% endif %}
+        </div>
+    {% endif %}
+
+    <!-- 로그인 폼 -->
+    <form action="/login" method="POST">
+        <div class="mb-3">
+            <label for="username" class="form-label fw-semibold">Username</label>
+            <input type="text" class="form-control" id="username" name="username" value="{{ username or '' }}" placeholder="Enter username" required autofocus>
+        </div>
+
+        <div class="mb-3">
+            <label for="password" class="form-label fw-semibold">Password</label>
+            <input type="password" class="form-control" id="password" name="password" placeholder="Enter password">
+        </div>
+
+        <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold">Sign In</button>
+    </form>
+
+    <!-- 실행된 쿼리 디버그 박스 -->
+    {% if executed_query %}
+        <div class="mt-4">
+            <label class="form-label fw-semibold text-muted small">Executed SQL Query:</label>
+            <div class="code-box">{{ executed_query }}</div>
+        </div>
+    {% endif %}
+
+    <!-- 실습 가이드 -->
+    <div class="mt-4 pt-3 border-top">
+        <h6 class="fw-bold text-secondary small">💡 Demo & Attack Payload:</h6>
+        <ul class="small text-muted mb-0 ps-3">
+            <li><strong>정상 데모 계정:</strong> <code>admin</code> / <code>admin1234</code></li>
+            <li><strong>SQL Injection 바이패스:</strong>
+                <ul>
+                    <li>Username: <code>admin' --</code> (Password: 임의값)</li>
+                    <li>Username: <code>' OR '1'='1</code> (Password: 임의값)</li>
+                </ul>
+            </li>
+        </ul>
+    </div>
+</div>
+
+</body>
+</html>
