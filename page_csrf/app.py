@@ -2,6 +2,7 @@ import sqlite3
 import os
 import secrets
 from flask import Flask, request, render_template, redirect, url_for, session, flash
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.environ.get("SECRET_KEY") or secrets.token_hex(32)
@@ -23,9 +24,10 @@ def init_db():
     # 기본 테스트 계정 생성: alice / password123
     cursor.execute("SELECT COUNT(*) FROM users")
     if cursor.fetchone()[0] == 0:
+        hashed_password = generate_password_hash("password123")
         cursor.execute(
             "INSERT INTO users (username, password, email) VALUES (?, ?, ?)",
-            ("alice", "password123", "alice@example.com")
+            ("alice", hashed_password, "alice@example.com")
         )
         conn.commit()
     conn.close()
@@ -43,9 +45,10 @@ def get_user_by_username(username):
 
 def update_password(username, new_password):
     """사용자 비밀번호 변경"""
+    hashed_password = generate_password_hash(new_password)
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("UPDATE users SET password = ? WHERE username = ?", (new_password, username))
+    cursor.execute("UPDATE users SET password = ? WHERE username = ?", (hashed_password, username))
     conn.commit()
     conn.close()
 
@@ -84,7 +87,7 @@ def login():
         password = request.form.get("password", "").strip()
 
         user = get_user_by_username(username)
-        if user and user[2] == password:
+        if user and check_password_hash(user[2], password):
             session["username"] = username
             flash("로그인에 성공했습니다!", "success")
             return redirect(url_for("profile"))
