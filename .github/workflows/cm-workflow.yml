@@ -53,19 +53,29 @@ jobs:
 
           # 방법 2: Service Account Key JSON
           credentials_json: ${{ secrets.GCP_SA_KEY }}
+          create_credentials_file: false
+          export_environment_variables: false
 
       - name: Configure Application Default Credentials (ADC)
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
         run: |
           mkdir -p ~/.config/gcloud
-          if [ -n "$GOOGLE_APPLICATION_CREDENTIALS" ] && [ -f "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
-            # cm 실행 시 워크스페이스 내 git clean -fd로 인해 키 파일이 삭제되는 것을 방지하기 위해 외부 경로로 보존
-            cp "$GOOGLE_APPLICATION_CREDENTIALS" /tmp/gcp_credentials.json
-            cp "$GOOGLE_APPLICATION_CREDENTIALS" ~/.config/gcloud/application_default_credentials.json
-            echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp_credentials.json" >> $GITHUB_ENV
-          fi
-          if [ -n "${{ steps.auth.outputs.project_id }}" ]; then
-            echo "CLOUDSDK_CORE_PROJECT=${{ steps.auth.outputs.project_id }}" >> $GITHUB_ENV
-            echo "GOOGLE_CLOUD_PROJECT=${{ steps.auth.outputs.project_id }}" >> $GITHUB_ENV
+          echo "$GCP_SA_KEY" > /tmp/gcp_credentials.json
+          echo "$GCP_SA_KEY" > ~/.config/gcloud/application_default_credentials.json
+          chmod 600 /tmp/gcp_credentials.json ~/.config/gcloud/application_default_credentials.json
+
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp_credentials.json" >> $GITHUB_ENV
+
+          # gcloud CLI에서 해당 Service Account 활성화
+          gcloud auth activate-service-account --key-file=/tmp/gcp_credentials.json
+
+          # Project ID 추출 및 환경설정
+          PROJECT_ID=$(python3 -c 'import json, os; print(json.loads(os.environ.get("GCP_SA_KEY", "{}")).get("project_id", ""))')
+          if [ -n "$PROJECT_ID" ]; then
+            echo "CLOUDSDK_CORE_PROJECT=$PROJECT_ID" >> $GITHUB_ENV
+            echo "GOOGLE_CLOUD_PROJECT=$PROJECT_ID" >> $GITHUB_ENV
+            gcloud config set project "$PROJECT_ID" || true
           fi
 
       - name: Set up Cloud SDK
@@ -136,6 +146,8 @@ jobs:
       # ----------------------------------------------------------------------
       - name: Run Code Mender Scan (find)
         id: cm_scan
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp_credentials.json
         run: |
           echo "=== 4. Running Code Mender Scan ==="
           # 러너 환경 자체가 격리된 샌드박스이므로 --sandbox=false 적용
@@ -148,6 +160,7 @@ jobs:
         id: cm_verify_and_fix
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp_credentials.json
         run: |
           python3 - << 'EOF'
           import json
