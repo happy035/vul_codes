@@ -4,7 +4,7 @@ import secrets
 from flask import Flask, request, render_template, redirect, url_for, session, flash
 
 app = Flask(__name__)
-app.secret_key = "super-secret-key-for-csrf-demo"
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.environ.get("SECRET_KEY") or secrets.token_hex(32)
 DB_FILE = "csrf_demo.db"
 
 
