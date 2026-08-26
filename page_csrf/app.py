@@ -177,4 +177,8 @@ if __name__ == "__main__":
     print("Starting Flask CSRF Demo application on http://127.0.0.1:8000")
     print("Default user: alice / password123")
     print("CSRF Attack simulation URL: http://127.0.0.1:8000/attacker")
-    app.run(host="0.0.0.0", port=8000, debug=True)
+    
+    # Disable debug mode by default and bind to 127.0.0.1 to prevent unauthorized external access
+    host = os.environ.get("FLASK_HOST", "127.0.0.1")
+    debug_mode = os.environ.get("FLASK_DEBUG", "False").lower() in ("true", "1")
+    app.run(host=host, port=8000, debug=debug_mode)
