@@ -3,3 +3,12 @@ gha-creds-*.json
 *.key.json
 service-account*.json
 .codemender/
+__pycache__/
+*.pyc
+*.db
+venv/
+.venv/
+env/
+.exploit/
+**/.exploit/
+prompts.MD
