@@ -2,9 +2,36 @@ import sqlite3
 import os
 from flask import Flask, request, render_template, redirect, url_for, session, flash
 
+import secrets
+
 app = Flask(__name__)
 app.secret_key = "super-secret-key-for-csrf-demo"
 DB_FILE = "csrf_demo.db"
+
+
+def get_csrf_token():
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(32)
+    return session["csrf_token"]
+
+
+@app.context_processor
+def inject_csrf_token():
+    return dict(csrf_token=get_csrf_token)
+
+
+@app.before_request
+def csrf_protect():
+    if request.method == "POST":
+        if request.path == "/login":
+            return
+        
+        token = request.form.get("csrf_token")
+        session_token = session.get("csrf_token")
+        
+        if not session_token or not token or token != session_token:
+            from flask import abort
+            abort(400, "CSRF token missing or invalid.")
 
 
 def init_db():
