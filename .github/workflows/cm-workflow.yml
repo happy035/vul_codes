@@ -56,13 +56,15 @@ jobs:
           find . -name "requirements.txt" -type f -exec python -m pip install -r {} +
           pip install requests
 
-          # cm verify 및 fix 에이전트가 로컬 venv를 참조할 수 있도록 venv 구성
-          if [ -d "login_sql_injection" ]; then
-            echo "=== Setting up venv for login_sql_injection ==="
-            python -m venv login_sql_injection/venv
-            login_sql_injection/venv/bin/pip install --upgrade pip
-            login_sql_injection/venv/bin/pip install -r login_sql_injection/requirements.txt
-          fi
+          # cm verify 및 fix 에이전트가 로컬 venv를 참조할 수 있도록 각 서브디렉토리별 venv 구성
+          for dir in */ ; do
+            if [ -f "${dir}requirements.txt" ]; then
+              echo "=== Setting up venv for ${dir} ==="
+              python -m venv "${dir}venv"
+              "${dir}venv/bin/pip" install --upgrade pip
+              "${dir}venv/bin/pip" install -r "${dir}requirements.txt"
+            fi
+          done
 
           echo "=== Installed Python Packages ==="
           pip list
