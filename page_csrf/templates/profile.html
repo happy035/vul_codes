@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>마이페이지 - CSRF 취약점 실습</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; color: #333; padding: 40px 20px; }
+        .container { max-width: 700px; margin: 0 auto; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }
+        .header h1 { font-size: 24px; color: #2c3e50; }
+        .btn-logout { padding: 8px 16px; background: #e74c3c; color: white; text-decoration: none; border-radius: 5px; font-size: 13px; font-weight: bold; }
+        .card { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 25px; margin-bottom: 20px; }
+        .card h3 { margin-bottom: 15px; color: #34495e; border-bottom: 2px solid #ecf0f1; padding-bottom: 10px; }
+        .info-row { display: flex; margin-bottom: 10px; font-size: 15px; }
+        .info-label { width: 140px; font-weight: 600; color: #7f8c8d; }
+        .info-value { color: #2c3e50; font-weight: bold; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color: #555; }
+        .form-group input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; }
+        .btn-primary { padding: 10px 20px; background: #3498db; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; }
+        .btn-primary:hover { background: #2980b9; }
+        .flash-msg { padding: 12px 15px; border-radius: 5px; margin-bottom: 20px; font-size: 14px; }
+        .flash-msg.success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .flash-msg.danger { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .alert-box { background: #fff3cd; border-left: 4px solid #f39c12; padding: 15px; border-radius: 5px; font-size: 14px; line-height: 1.6; }
+        .alert-box a { color: #d35400; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🛡️ 사용자 마이페이지</h1>
+            <a href="/logout" class="btn-logout">로그아웃</a>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="flash-msg {{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <!-- 계정 정보 -->
+        <div class="card">
+            <h3>👤 내 계정 프로필</h3>
+            <div class="info-row">
+                <span class="info-label">아이디:</span>
+                <span class="info-value">{{ user[1] }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">현재 비밀번호:</span>
+                <span class="info-value"><code>{{ user[2] }}</code></span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">이메일:</span>
+                <span class="info-value">{{ user[3] }}</span>
+            </div>
+        </div>
+
+        <!-- 비밀번호 변경 폼 (CSRF 취약: Anti-CSRF 토큰 누락) -->
+        <div class="card">
+            <h3>🔑 비밀번호 변경 (CWE-352 취약)</h3>
+            <form action="/change-password" method="POST">
+                <!-- 취약점: <input type="hidden" name="csrf_token" value="..."> 이 없음 -->
+                <div class="form-group">
+                    <label for="new_password">새 비밀번호</label>
+                    <input type="password" id="new_password" name="new_password" placeholder="변경할 새 비밀번호 입력" required>
+                </div>
+                <button type="submit" class="btn-primary">비밀번호 변경</button>
+            </form>
+        </div>
+
+        <!-- 이메일 변경 폼 (CSRF 취약) -->
+        <div class="card">
+            <h3>📧 이메일 변경 (CWE-352 취약)</h3>
+            <form action="/change-email" method="POST">
+                <div class="form-group">
+                    <label for="new_email">새 이메일 주소</label>
+                    <input type="email" id="new_email" name="new_email" placeholder="변경할 이메일 주소 입력" required>
+                </div>
+                <button type="submit" class="btn-primary">이메일 변경</button>
+            </form>
+        </div>
+
+        <div class="alert-box">
+            ⚠️ <strong>CSRF 공격 시연 방법:</strong><br>
+            현재 로그인된 상태에서 새로운 브라우저 탭을 열고 공격자가 만든 악성 페이지인 <a href="/attacker" target="_blank">http://127.0.0.1:8000/attacker</a> 로 이동해보세요.
+            사용자가 아무것도 클릭하지 않아도 비밀번호가 <code>hacked_password_999</code>로 강제 변경됩니다.
+        </div>
+    </div>
+</body>
+</html>

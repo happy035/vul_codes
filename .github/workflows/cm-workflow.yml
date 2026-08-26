@@ -18,9 +18,9 @@ permissions:
   id-token: write # Required for Workload Identity Federation (GCP OIDC auth)
 
 env:
-  # GCS 버킷 및 경로 설정 (GitHub Repository Variables 또는 Secrets로 설정 가능)
-  GCS_BUCKET: ${{ vars.GCS_BUCKET_NAME || secrets.GCS_BUCKET_NAME || '' }}
-  GCS_CONFIG_DIR: ${{ vars.GCS_CONFIG_DIR || secrets.GCS_CONFIG_DIR || 'codemender-config' }}
+  # GCS 버킷 및 경로 설정 (GitHub Repository Variables: GCS_BUCKET_NAME)
+  GCS_BUCKET: ${{ vars.GCS_BUCKET_NAME }}
+  GCS_CONFIG_DIR: ${{ vars.GCS_CONFIG_DIR }}
 
 jobs:
   codemender-analysis:
@@ -165,12 +165,35 @@ jobs:
           echo "=== Initializing Code Mender environment ==="
           cm init
 
-          if [ -n "$GCS_BUCKET" ]; then
-            echo "=== Restoring configuration & state from GCS (gs://${GCS_BUCKET}) ==="
-            gcloud storage cp "gs://${GCS_BUCKET}/${GCS_CONFIG_DIR}/config.yaml" ~/.codemender/config.yaml 2>/dev/null || echo "[INFO] No remote config.yaml found in GCS, using defaults."
-            gcloud storage cp "gs://${GCS_BUCKET}/${GCS_CONFIG_DIR}/state.db" ~/.codemender/state.db 2>/dev/null || echo "[INFO] No remote state.db found in GCS, starting fresh state."
+          GCS_TARGET_DIR="${GCS_CONFIG_DIR:-codemender-config}"
+
+          if [ -n "$GCS_BUCKET" ] && [ "$GCS_BUCKET" != "true" ] && [ "$GCS_BUCKET" != "false" ]; then
+            echo "=== Restoring configuration & state from GCS (gs://${GCS_BUCKET}/${GCS_TARGET_DIR}) ==="
+            mkdir -p ~/.codemender
+
+            # 1) 전체 아카이브(state.tar.gz) 복원 시도
+            if gcloud storage ls "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/state.tar.gz" 2>/dev/null; then
+              echo "[INFO] Found state.tar.gz in ${GCS_TARGET_DIR}, extracting to ~/.codemender..."
+              gcloud storage cp "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/state.tar.gz" /tmp/state.tar.gz
+              tar -xzf /tmp/state.tar.gz -C ~/ || true
+            elif gcloud storage ls "gs://${GCS_BUCKET}/state.tar.gz" 2>/dev/null; then
+              echo "[INFO] Found state.tar.gz in root, extracting to ~/.codemender..."
+              gcloud storage cp "gs://${GCS_BUCKET}/state.tar.gz" /tmp/state.tar.gz
+              tar -xzf /tmp/state.tar.gz -C ~/ || true
+            fi
+
+            # 2) 개별 config.yaml 및 state.db 복원 (단독 파일이 더 최신인 경우 대비)
+            if gcloud storage ls "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/config.yaml" 2>/dev/null; then
+              echo "[INFO] Restoring remote config.yaml from GCS..."
+              gcloud storage cp "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/config.yaml" ~/.codemender/config.yaml || true
+            fi
+
+            if gcloud storage ls "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/state.db" 2>/dev/null; then
+              echo "[INFO] Restoring remote state.db from GCS..."
+              gcloud storage cp "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/state.db" ~/.codemender/state.db || true
+            fi
           else
-            echo "[INFO] GCS_BUCKET_NAME not configured (Variables/Secrets). Skipping GCS config restore."
+            echo "[INFO] GCS_BUCKET_NAME not configured or invalid ($GCS_BUCKET). Skipping GCS config restore."
           fi
 
           # 설정 검증
@@ -391,16 +414,47 @@ jobs:
       - name: Backup Code Mender State & Logs to GCS
         if: always()
         run: |
-          if [ -n "$GCS_BUCKET" ]; then
-            echo "=== Backing up Code Mender state database to GCS ==="
-            if [ -f ~/.codemender/state.db ]; then
-              gcloud storage cp ~/.codemender/state.db "gs://${GCS_BUCKET}/${GCS_CONFIG_DIR}/state.db" 2>/dev/null || echo "[WARN] Failed to backup state.db to GCS."
+          GCS_TARGET_DIR="${GCS_CONFIG_DIR:-codemender-config}"
+
+          if [ -n "$GCS_BUCKET" ] && [ "$GCS_BUCKET" != "true" ] && [ "$GCS_BUCKET" != "false" ]; then
+            echo "=== Backing up Code Mender state & artifacts to GCS (gs://${GCS_BUCKET}/${GCS_TARGET_DIR}) ==="
+
+            # 1) ~/.codemender 전체 아카이브(state.tar.gz) 압축 및 업로드
+            if [ -d ~/.codemender ]; then
+              echo "--> Creating full ~/.codemender archive..."
+              tar -czf /tmp/state.tar.gz -C ~ .codemender
+              gcloud storage cp /tmp/state.tar.gz "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/state.tar.gz" || echo "[WARN] Failed to upload state.tar.gz"
+              gcloud storage cp /tmp/state.tar.gz "gs://${GCS_BUCKET}/state.tar.gz" || true
             fi
 
-            echo "=== Uploading workflow session logs to GCS ==="
-            if [ -d ~/.codemender/logs ]; then
-              gcloud storage cp -r ~/.codemender/logs "gs://${GCS_BUCKET}/${GCS_CONFIG_DIR}/logs/${{ github.run_id }}/" 2>/dev/null || echo "[WARN] Failed to upload logs to GCS."
+            # 2) 개별 state.db 직접 백업
+            if [ -f ~/.codemender/state.db ]; then
+              echo "--> Uploading state.db to GCS..."
+              gcloud storage cp ~/.codemender/state.db "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/state.db" || echo "[WARN] Failed to upload state.db"
             fi
+
+            # 3) config.yaml 및 audit.log 백업
+            if [ -f ~/.codemender/config.yaml ]; then
+              echo "--> Uploading config.yaml to GCS..."
+              gcloud storage cp ~/.codemender/config.yaml "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/config.yaml" || true
+            fi
+            if [ -f ~/.codemender/audit.log ]; then
+              echo "--> Uploading audit.log to GCS..."
+              gcloud storage cp ~/.codemender/audit.log "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/audit.log" || true
+            fi
+
+            # 4) 실행 로그 및 아티팩트 디렉토리 백업 (Run ID 단위 격리)
+            if [ -d ~/.codemender/logs ]; then
+              echo "--> Uploading logs to GCS..."
+              gcloud storage cp -r ~/.codemender/logs "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/logs/${{ github.run_id }}/" || true
+            fi
+
+            if [ -d ~/.codemender/artifacts ]; then
+              echo "--> Uploading artifacts to GCS..."
+              gcloud storage cp -r ~/.codemender/artifacts "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/artifacts/${{ github.run_id }}/" || true
+            fi
+
+            echo "[SUCCESS] GCS Backup process completed."
           else
-            echo "[INFO] GCS_BUCKET_NAME not configured (Variables/Secrets). Skipping GCS backup."
+            echo "[INFO] GCS_BUCKET_NAME not configured or invalid ($GCS_BUCKET). Skipping GCS backup."
           fi
