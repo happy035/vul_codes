@@ -49,11 +49,21 @@ jobs:
           cache: 'pip'
           cache-dependency-path: '**/requirements.txt'
 
-      - name: Install Python Dependencies (requirements.txt)
+      - name: Install Python Dependencies & Prepare Environments
         run: |
           python -m pip install --upgrade pip
-          echo "=== Installing dependencies from requirements.txt ==="
+          echo "=== Installing global python dependencies ==="
           find . -name "requirements.txt" -type f -exec python -m pip install -r {} +
+          pip install requests
+
+          # cm verify 및 fix 에이전트가 로컬 venv를 참조할 수 있도록 venv 구성
+          if [ -d "login_sql_injection" ]; then
+            echo "=== Setting up venv for login_sql_injection ==="
+            python -m venv login_sql_injection/venv
+            login_sql_injection/venv/bin/pip install --upgrade pip
+            login_sql_injection/venv/bin/pip install -r login_sql_injection/requirements.txt
+          fi
+
           echo "=== Installed Python Packages ==="
           pip list
 
@@ -170,8 +180,8 @@ jobs:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp_credentials.json
         run: |
           echo "=== 4. Running Code Mender Scan ==="
-          # 러너 환경 자체가 격리된 샌드박스이므로 --sandbox=false 적용
-          cm find . -y --sandbox=false
+          # 러너 환경 자체가 격리된 샌드박스이므로 --sandbox=false 및 --bypass-warning 적용
+          cm find . -y --sandbox=false --bypass-warning
 
       # ----------------------------------------------------------------------
       # 5. 취약점 검증 (cm verify) 및 자동 패치 브랜치 생성 (cm fix)
@@ -221,8 +231,8 @@ jobs:
 
               try:
                   # (1) 취약점 검증 (cm verify)
-                  print(f"--> Step 1: Verifying vulnerability with 'cm verify {finding_id} --sandbox=false'...")
-                  verify_proc = subprocess.run(["cm", "verify", finding_id, "-y", "--sandbox=false"], capture_output=True, text=True)
+                  print(f"--> Step 1: Verifying vulnerability with 'cm verify {finding_id} -y --sandbox=false --bypass-warning'...")
+                  verify_proc = subprocess.run(["cm", "verify", finding_id, "-y", "--sandbox=false", "--bypass-warning"], capture_output=True, text=True)
                   print(verify_proc.stdout)
 
                   if verify_proc.returncode != 0:
@@ -238,8 +248,8 @@ jobs:
                   subprocess.run(["git", "checkout", "-B", branch_name, base_commit], check=True)
 
                   # (3) cm fix로 보안 패치 적용
-                  print(f"--> Step 3: Generating and applying fix with 'cm fix {finding_id} --sandbox=false'...")
-                  fix_proc = subprocess.run(["cm", "fix", finding_id, "-y", "--sandbox=false"], capture_output=True, text=True)
+                  print(f"--> Step 3: Generating and applying fix with 'cm fix {finding_id} -y --sandbox=false --bypass-warning'...")
+                  fix_proc = subprocess.run(["cm", "fix", finding_id, "-y", "--sandbox=false", "--bypass-warning"], capture_output=True, text=True)
                   print(fix_proc.stdout)
 
                   if fix_proc.returncode != 0:
