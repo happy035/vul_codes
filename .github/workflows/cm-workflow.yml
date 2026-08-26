@@ -18,9 +18,8 @@ permissions:
   id-token: write # Required for Workload Identity Federation (GCP OIDC auth)
 
 env:
-  # GCS 버킷 및 경로 설정 (필요에 따라 GitHub Repository Secrets / Variables로 변경 가능)
-  GCS_BUCKET: ${{ secrets.GCS_BUCKET_NAME || 'my-codemender-bucket' }}
-  GCS_CM_BINARY_PATH: ${{ secrets.GCS_CM_BINARY_PATH || 'bin/linux_amd64/cm' }}
+  # GCS 버킷 및 경로 설정 (선택 사항: GitHub Repository Secrets로 설정 가능)
+  GCS_BUCKET: ${{ secrets.GCS_BUCKET_NAME || '' }}
   GCS_CONFIG_DIR: ${{ secrets.GCS_CONFIG_DIR || 'codemender-config' }}
 
 jobs:
@@ -133,10 +132,13 @@ jobs:
           echo "=== Initializing Code Mender environment ==="
           cm init
 
-          echo "=== Restoring configuration & state from GCS ==="
-          # GCS 버킷에 저장된 config.yaml 및 state.db 가져오기 (존재할 경우)
-          gcloud storage cp "gs://${GCS_BUCKET}/${GCS_CONFIG_DIR}/config.yaml" ~/.codemender/config.yaml || echo "No remote config.yaml found, using defaults from cm init."
-          gcloud storage cp "gs://${GCS_BUCKET}/${GCS_CONFIG_DIR}/state.db" ~/.codemender/state.db || echo "No existing state.db found, starting fresh state."
+          if [ -n "$GCS_BUCKET" ]; then
+            echo "=== Restoring configuration & state from GCS (gs://${GCS_BUCKET}) ==="
+            gcloud storage cp "gs://${GCS_BUCKET}/${GCS_CONFIG_DIR}/config.yaml" ~/.codemender/config.yaml 2>/dev/null || echo "[INFO] No remote config.yaml found in GCS, using defaults."
+            gcloud storage cp "gs://${GCS_BUCKET}/${GCS_CONFIG_DIR}/state.db" ~/.codemender/state.db 2>/dev/null || echo "[INFO] No remote state.db found in GCS, starting fresh state."
+          else
+            echo "[INFO] GCS_BUCKET_NAME secret not configured. Skipping GCS config restore."
+          fi
 
           # 설정 검증
           cm init --verify
@@ -262,12 +264,16 @@ jobs:
       - name: Backup Code Mender State & Logs to GCS
         if: always()
         run: |
-          echo "=== Backing up Code Mender state database to GCS ==="
-          if [ -f ~/.codemender/state.db ]; then
-            gcloud storage cp ~/.codemender/state.db "gs://${GCS_BUCKET}/${GCS_CONFIG_DIR}/state.db" || true
-          fi
+          if [ -n "$GCS_BUCKET" ]; then
+            echo "=== Backing up Code Mender state database to GCS ==="
+            if [ -f ~/.codemender/state.db ]; then
+              gcloud storage cp ~/.codemender/state.db "gs://${GCS_BUCKET}/${GCS_CONFIG_DIR}/state.db" 2>/dev/null || echo "[WARN] Failed to backup state.db to GCS."
+            fi
 
-          echo "=== Uploading workflow session logs to GCS ==="
-          if [ -d ~/.codemender/logs ]; then
-            gcloud storage cp -r ~/.codemender/logs "gs://${GCS_BUCKET}/${GCS_CONFIG_DIR}/logs/${{ github.run_id }}/" || true
+            echo "=== Uploading workflow session logs to GCS ==="
+            if [ -d ~/.codemender/logs ]; then
+              gcloud storage cp -r ~/.codemender/logs "gs://${GCS_BUCKET}/${GCS_CONFIG_DIR}/logs/${{ github.run_id }}/" 2>/dev/null || echo "[WARN] Failed to upload logs to GCS."
+            fi
+          else
+            echo "[INFO] GCS_BUCKET_NAME secret not configured. Skipping GCS backup."
           fi
