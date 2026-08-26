@@ -177,22 +177,74 @@ jobs:
           cm init --verify
 
       # ----------------------------------------------------------------------
-      # 4. 소스코드 취약점 스캔 (cm find)
+      # 3.5 변경된 소스코드 파일 탐지 (증분 스캔)
+      # ----------------------------------------------------------------------
+      - name: Detect Changed Source Files (Incremental Scan)
+        id: detect_changes
+        run: |
+          echo "=== Detecting Changed Files in this Push/PR ==="
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED_FILES=$(git diff --name-only --diff-filter=d origin/${{ github.base_ref }}...HEAD)
+          elif [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            CHANGED_FILES=$(git diff --name-only --diff-filter=d ${{ github.event.before }} ${{ github.sha }})
+          else
+            CHANGED_FILES=$(git diff --name-only --diff-filter=d HEAD~1 HEAD 2>/dev/null || git ls-files)
+          fi
+
+          echo "All modified files:"
+          echo "$CHANGED_FILES"
+
+          # 소스 코드 확장자만 필터링 (.py, .java, .cpp, .c, .h, .hpp, .js, .ts, .go, .rb, .php, .html 등)
+          TARGET_FILES=""
+          for f in $CHANGED_FILES; do
+            if [ -f "$f" ]; then
+              case "$f" in
+                *.py|*.java|*.cpp|*.c|*.h|*.hpp|*.js|*.ts|*.go|*.rb|*.php|*.html)
+                  TARGET_FILES="$TARGET_FILES $f"
+                  ;;
+              esac
+            fi
+          done
+
+          # 수동 실행(workflow_dispatch) 시 변경 파일이 없으면 전체 저장소 스캔
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -z "$TARGET_FILES" ]; then
+            echo "Workflow manually dispatched. Scanning entire repository."
+            TARGET_FILES="."
+          fi
+
+          if [ -z "$TARGET_FILES" ]; then
+            echo "[INFO] No source code files modified in this push. Skipping Code Mender scan."
+            echo "skip_scan=true" >> $GITHUB_OUTPUT
+            echo "targets=" >> $GITHUB_OUTPUT
+          else
+            echo "[INFO] Target source files to scan: $TARGET_FILES"
+            echo "skip_scan=false" >> $GITHUB_OUTPUT
+            echo "targets=$TARGET_FILES" >> $GITHUB_OUTPUT
+          fi
+
+      # ----------------------------------------------------------------------
+      # 4. 소스코드 취약점 스캔 (cm find - 증분 스캔)
       # ----------------------------------------------------------------------
       - name: Run Code Mender Scan (find)
         id: cm_scan
+        if: steps.detect_changes.outputs.skip_scan != 'true'
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp_credentials.json
+          TARGETS: ${{ steps.detect_changes.outputs.targets }}
         run: |
-          echo "=== 4. Running Code Mender Scan ==="
-          # 러너 환경 자체가 격리된 샌드박스이므로 --sandbox=false 및 --bypass-warning 적용
-          cm find . -y --sandbox=false --bypass-warning
+          echo "=== 4. Running Code Mender Scan on modified targets ==="
+          for target in $TARGETS; do
+            echo "--> Scanning target: $target"
+            cm find "$target" -y --sandbox=false --bypass-warning
+          done
 
       # ----------------------------------------------------------------------
       # 5. 취약점 검증 (cm verify) 및 자동 패치 브랜치 생성 (cm fix)
       # ----------------------------------------------------------------------
       - name: Verify Findings & Create Fix Branches (Pre-PR stage)
         id: cm_verify_and_fix
+        if: steps.detect_changes.outputs.skip_scan != 'true'
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
