@@ -18,9 +18,9 @@ permissions:
   id-token: write # Required for Workload Identity Federation (GCP OIDC auth)
 
 env:
-  # GCS 버킷 및 경로 설정 (선택 사항: GitHub Repository Secrets로 설정 가능)
-  GCS_BUCKET: ${{ secrets.GCS_BUCKET_NAME || '' }}
-  GCS_CONFIG_DIR: ${{ secrets.GCS_CONFIG_DIR || 'codemender-config' }}
+  # GCS 버킷 및 경로 설정 (GitHub Repository Variables 또는 Secrets로 설정 가능)
+  GCS_BUCKET: ${{ vars.GCS_BUCKET_NAME || secrets.GCS_BUCKET_NAME || '' }}
+  GCS_CONFIG_DIR: ${{ vars.GCS_CONFIG_DIR || secrets.GCS_CONFIG_DIR || 'codemender-config' }}
 
 jobs:
   codemender-analysis:
@@ -137,7 +137,7 @@ jobs:
             gcloud storage cp "gs://${GCS_BUCKET}/${GCS_CONFIG_DIR}/config.yaml" ~/.codemender/config.yaml 2>/dev/null || echo "[INFO] No remote config.yaml found in GCS, using defaults."
             gcloud storage cp "gs://${GCS_BUCKET}/${GCS_CONFIG_DIR}/state.db" ~/.codemender/state.db 2>/dev/null || echo "[INFO] No remote state.db found in GCS, starting fresh state."
           else
-            echo "[INFO] GCS_BUCKET_NAME secret not configured. Skipping GCS config restore."
+            echo "[INFO] GCS_BUCKET_NAME not configured (Variables/Secrets). Skipping GCS config restore."
           fi
 
           # 설정 검증
@@ -275,5 +275,5 @@ jobs:
               gcloud storage cp -r ~/.codemender/logs "gs://${GCS_BUCKET}/${GCS_CONFIG_DIR}/logs/${{ github.run_id }}/" 2>/dev/null || echo "[WARN] Failed to upload logs to GCS."
             fi
           else
-            echo "[INFO] GCS_BUCKET_NAME secret not configured. Skipping GCS backup."
+            echo "[INFO] GCS_BUCKET_NAME not configured (Variables/Secrets). Skipping GCS backup."
           fi
