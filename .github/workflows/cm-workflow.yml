@@ -44,14 +44,29 @@ jobs:
       # 1. Google Cloud 인증 및 Cloud SDK 설정
       # ----------------------------------------------------------------------
       - name: Authenticate to Google Cloud
+        id: auth
         uses: google-github-actions/auth@v2
         with:
           # 방법 1: Workload Identity Federation (권장)
           # workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           # service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-          
+
           # 방법 2: Service Account Key JSON
           credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Configure Application Default Credentials (ADC)
+        run: |
+          mkdir -p ~/.config/gcloud
+          if [ -n "$GOOGLE_APPLICATION_CREDENTIALS" ] && [ -f "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
+            # cm 실행 시 워크스페이스 내 git clean -fd로 인해 키 파일이 삭제되는 것을 방지하기 위해 외부 경로로 보존
+            cp "$GOOGLE_APPLICATION_CREDENTIALS" /tmp/gcp_credentials.json
+            cp "$GOOGLE_APPLICATION_CREDENTIALS" ~/.config/gcloud/application_default_credentials.json
+            echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp_credentials.json" >> $GITHUB_ENV
+          fi
+          if [ -n "${{ steps.auth.outputs.project_id }}" ]; then
+            echo "CLOUDSDK_CORE_PROJECT=${{ steps.auth.outputs.project_id }}" >> $GITHUB_ENV
+            echo "GOOGLE_CLOUD_PROJECT=${{ steps.auth.outputs.project_id }}" >> $GITHUB_ENV
+          fi
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -86,7 +101,7 @@ jobs:
 
           echo "=== Extracting and installing cm binary ==="
           unzip -o "/tmp/cm-install/${ZIP_FILE}" -d /tmp/cm-install/extracted/
-          
+
           # 압축 해제된 디렉토리 내 cm 바이너리 탐색 및 설치
           CM_BIN=$(find /tmp/cm-install/extracted/ -type f -name "cm" | head -n 1)
           if [ -z "$CM_BIN" ]; then
@@ -96,9 +111,9 @@ jobs:
 
           chmod +x "$CM_BIN"
           sudo mv "$CM_BIN" /usr/local/bin/cm
-          
+
           echo "=== Verifying Code Mender installation ==="
-          cm --version || cm -v || true
+          cm --version || cm -v
 
       # ----------------------------------------------------------------------
       # 3. Code Mender 초기화 (cm init) 및 GCS 환경설정 동기화
@@ -114,7 +129,7 @@ jobs:
           gcloud storage cp "gs://${GCS_BUCKET}/${GCS_CONFIG_DIR}/state.db" ~/.codemender/state.db || echo "No existing state.db found, starting fresh state."
 
           # 설정 검증
-          cm init --verify || true
+          cm init --verify
 
       # ----------------------------------------------------------------------
       # 4. 소스코드 취약점 스캔 (cm find)
@@ -141,20 +156,16 @@ jobs:
           import sys
 
           print("=== 5. Retrieving Findings Report ===")
+          report_proc = subprocess.run(["cm", "report", "-f", "json"], capture_output=True, text=True)
+          if report_proc.returncode != 0:
+              print(f"[ERROR] cm report failed (exit {report_proc.returncode}):\n{report_proc.stderr}", file=sys.stderr)
+              sys.exit(1)
           try:
-              report_proc = subprocess.run(["cm", "report", "-f", "json"], capture_output=True, text=True)
-              raw_output = report_proc.stdout
-              
-              # JSON 배열 영역 추출
-              start_idx = raw_output.find("[")
-              end_idx = raw_output.rfind("]") + 1
-              if start_idx != -1 and end_idx > start_idx:
-                  findings = json.loads(raw_output[start_idx:end_idx])
-              else:
-                  findings = []
-          except Exception as e:
-              print(f"Failed to parse findings report: {e}", file=sys.stderr)
-              findings = []
+              findings = json.loads(report_proc.stdout)
+          except json.JSONDecodeError as e:
+              print(f"[ERROR] Failed to parse findings report as JSON: {e}", file=sys.stderr)
+              print(f"Raw output: {report_proc.stdout[:500]}", file=sys.stderr)
+              sys.exit(1)
 
           print(f"Total findings identified: {len(findings)}")
 
@@ -175,49 +186,59 @@ jobs:
               print(f"    Title: {title}")
               print(f"    Severity: {severity} | Current Status: {status}")
 
-              # (1) 취약점 검증 (cm verify)
-              print(f"--> Step 1: Verifying vulnerability with 'cm verify {finding_id} --sandbox=false'...")
-              verify_proc = subprocess.run(["cm", "verify", finding_id, "-y", "--sandbox=false"], capture_output=True, text=True)
-              print(verify_proc.stdout)
+              try:
+                  # (1) 취약점 검증 (cm verify)
+                  print(f"--> Step 1: Verifying vulnerability with 'cm verify {finding_id} --sandbox=false'...")
+                  verify_proc = subprocess.run(["cm", "verify", finding_id, "-y", "--sandbox=false"], capture_output=True, text=True)
+                  print(verify_proc.stdout)
 
-              if verify_proc.returncode != 0:
-                  print(f"[-] Verification failed or dismissed for {finding_id}. Skipping fix.")
-                  continue
+                  if verify_proc.returncode != 0:
+                      print(f"[-] Verification failed or dismissed for {finding_id}. Skipping fix.")
+                      continue
 
-              print(f"[+] Finding {finding_id} successfully verified.")
+                  print(f"[+] Finding {finding_id} successfully verified.")
 
-              # (2) 기준 커밋(base_commit)으로부터 Finding 전용 브랜치 생성 및 체크아웃
-              branch_name = f"cm-fix/{finding_id[:8]}"
-              print(f"--> Step 2: Creating and checking out branch '{branch_name}' from commit '{base_commit[:8]}'...")
-              subprocess.run(["git", "checkout", "-B", branch_name, base_commit], check=True)
+                  # (2) 기준 커밋(base_commit)으로부터 Finding 전용 브랜치 생성 및 체크아웃
+                  safe_id = finding_id.replace("/", "-").replace(".", "-")
+                  branch_name = f"cm-fix/{safe_id}"
+                  print(f"--> Step 2: Creating and checking out branch '{branch_name}' from commit '{base_commit[:8]}'...")
+                  subprocess.run(["git", "checkout", "-B", branch_name, base_commit], check=True)
 
-              # (3) cm fix로 보안 패치 적용
-              print(f"--> Step 3: Generating and applying fix with 'cm fix {finding_id} --sandbox=false'...")
-              fix_proc = subprocess.run(["cm", "fix", finding_id, "-y", "--sandbox=false"], capture_output=True, text=True)
-              print(fix_proc.stdout)
+                  # (3) cm fix로 보안 패치 적용
+                  print(f"--> Step 3: Generating and applying fix with 'cm fix {finding_id} --sandbox=false'...")
+                  fix_proc = subprocess.run(["cm", "fix", finding_id, "-y", "--sandbox=false"], capture_output=True, text=True)
+                  print(fix_proc.stdout)
 
-              # (4) 코드 변경사항 커밋
-              status_proc = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
-              if status_proc.stdout.strip():
-                  print(f"--> Step 4: Staging and committing changes on branch '{branch_name}'...")
-                  subprocess.run(["git", "add", "."], check=True)
-                  commit_message = f"fix(security): resolve {title}\n\nCode Mender Finding ID: {finding_id}\nSeverity: {severity}"
-                  subprocess.run(["git", "commit", "-m", commit_message], check=True)
+                  if fix_proc.returncode != 0:
+                      print(f"[-] cm fix failed for {finding_id} (exit {fix_proc.returncode}), skipping commit.", file=sys.stderr)
+                      print(fix_proc.stderr, file=sys.stderr)
+                      continue
 
-                  # (5) 원격 저장소로 브랜치 Push (PR 생성 전단계)
-                  print(f"--> Step 5: Pushing branch '{branch_name}' to origin...")
-                  push_proc = subprocess.run(["git", "push", "-u", "origin", branch_name, "--force"], capture_output=True, text=True)
-                  if push_proc.returncode == 0:
-                      print(f"[SUCCESS] Branch '{branch_name}' successfully pushed to remote.")
-                      if repo_name:
-                          print(f"--> PR Create URL: https://github.com/{repo_name}/pull/new/{branch_name}")
+                  # (4) 코드 변경사항 커밋
+                  status_proc = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
+                  if status_proc.stdout.strip():
+                      print(f"--> Step 4: Staging and committing changes on branch '{branch_name}'...")
+                      subprocess.run(["git", "add", "."], check=True)
+                      commit_message = f"fix(security): resolve {title}\n\nCode Mender Finding ID: {finding_id}\nSeverity: {severity}"
+                      subprocess.run(["git", "commit", "-m", commit_message], check=True)
+
+                      # (5) 원격 저장소로 브랜치 Push (PR 생성 전단계)
+                      print(f"--> Step 5: Pushing branch '{branch_name}' to origin...")
+                      push_proc = subprocess.run(["git", "push", "-u", "origin", branch_name, "--force"], capture_output=True, text=True)
+                      if push_proc.returncode == 0:
+                          print(f"[SUCCESS] Branch '{branch_name}' successfully pushed to remote.")
+                          if repo_name:
+                              print(f"--> PR Create URL: https://github.com/{repo_name}/pull/new/{branch_name}")
+                      else:
+                          print(f"[ERROR] Failed to push branch: {push_proc.stderr}", file=sys.stderr)
                   else:
-                      print(f"[ERROR] Failed to push branch: {push_proc.stderr}", file=sys.stderr)
-              else:
-                  print(f"[-] No file changes were generated by 'cm fix' for finding {finding_id}.")
+                      print(f"[-] No file changes were generated by 'cm fix' for finding {finding_id}.")
 
-              # 다음 검증을 위해 원본 베이스 커밋으로 복귀
-              subprocess.run(["git", "checkout", base_commit], check=True)
+              except subprocess.CalledProcessError as e:
+                  print(f"[ERROR] Git command failed for finding {finding_id}: {e}", file=sys.stderr)
+              finally:
+                  # 다음 검증을 위해 원본 베이스 커밋으로 복귀
+                  subprocess.run(["git", "checkout", base_commit])
 
           print("\n=== All findings processed successfully ===")
           EOF
@@ -237,4 +258,3 @@ jobs:
           if [ -d ~/.codemender/logs ]; then
             gcloud storage cp -r ~/.codemender/logs "gs://${GCS_BUCKET}/${GCS_CONFIG_DIR}/logs/${{ github.run_id }}/" || true
           fi
-

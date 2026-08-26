@@ -1,0 +1,5 @@
+# Credentials and local temporary files
+gha-creds-*.json
+*.key.json
+service-account*.json
+.codemender/
