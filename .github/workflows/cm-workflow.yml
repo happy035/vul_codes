@@ -18,9 +18,9 @@ permissions:
   id-token: write # Required for Workload Identity Federation (GCP OIDC auth)
 
 env:
-  # GCS 버킷 및 경로 설정 (GitHub Repository Variables: GCS_BUCKET_NAME)
-  GCS_BUCKET: ${{ vars.GCS_BUCKET_NAME }}
-  GCS_CONFIG_DIR: ${{ vars.GCS_CONFIG_DIR }}
+  # GCS 버킷 및 경로 설정 (GitHub Repository Variables 또는 Secrets: GCS_BUCKET_NAME)
+  GCS_BUCKET: ${{ vars.GCS_BUCKET_NAME || secrets.GCS_BUCKET_NAME }}
+  GCS_CONFIG_DIR: ${{ vars.GCS_CONFIG_DIR || secrets.GCS_CONFIG_DIR }}
 
 jobs:
   codemender-analysis:
@@ -165,35 +165,43 @@ jobs:
           echo "=== Initializing Code Mender environment ==="
           cm init
 
+          RAW_BUCKET="${GCS_BUCKET:-}"
+          CLEAN_BUCKET=$(echo "$RAW_BUCKET" | sed -e 's|^gs://||' -e 's|/*$||')
           GCS_TARGET_DIR="${GCS_CONFIG_DIR:-codemender-config}"
 
-          if [ -n "$GCS_BUCKET" ] && [ "$GCS_BUCKET" != "true" ] && [ "$GCS_BUCKET" != "false" ]; then
-            echo "=== Restoring configuration & state from GCS (gs://${GCS_BUCKET}/${GCS_TARGET_DIR}) ==="
+          if [ -n "$CLEAN_BUCKET" ] && [ "$CLEAN_BUCKET" != "true" ] && [ "$CLEAN_BUCKET" != "false" ]; then
+            echo "=== Restoring configuration & state from GCS (gs://${CLEAN_BUCKET}/${GCS_TARGET_DIR}) ==="
             mkdir -p ~/.codemender
 
             # 1) 전체 아카이브(state.tar.gz) 복원 시도
-            if gcloud storage ls "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/state.tar.gz" 2>/dev/null; then
+            if gcloud storage ls "gs://${CLEAN_BUCKET}/${GCS_TARGET_DIR}/state.tar.gz" 2>/dev/null; then
               echo "[INFO] Found state.tar.gz in ${GCS_TARGET_DIR}, extracting to ~/.codemender..."
-              gcloud storage cp "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/state.tar.gz" /tmp/state.tar.gz
+              gcloud storage cp "gs://${CLEAN_BUCKET}/${GCS_TARGET_DIR}/state.tar.gz" /tmp/state.tar.gz
               tar -xzf /tmp/state.tar.gz -C ~/ || true
-            elif gcloud storage ls "gs://${GCS_BUCKET}/state.tar.gz" 2>/dev/null; then
-              echo "[INFO] Found state.tar.gz in root, extracting to ~/.codemender..."
-              gcloud storage cp "gs://${GCS_BUCKET}/state.tar.gz" /tmp/state.tar.gz
+            elif gcloud storage ls "gs://${CLEAN_BUCKET}/state.tar.gz" 2>/dev/null; then
+              echo "[INFO] Found state.tar.gz in bucket root, extracting to ~/.codemender..."
+              gcloud storage cp "gs://${CLEAN_BUCKET}/state.tar.gz" /tmp/state.tar.gz
               tar -xzf /tmp/state.tar.gz -C ~/ || true
+            else
+              echo "[INFO] No previous state.tar.gz found in GCS. Starting with fresh state."
             fi
 
             # 2) 개별 config.yaml 및 state.db 복원 (단독 파일이 더 최신인 경우 대비)
-            if gcloud storage ls "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/config.yaml" 2>/dev/null; then
+            if gcloud storage ls "gs://${CLEAN_BUCKET}/${GCS_TARGET_DIR}/config.yaml" 2>/dev/null; then
               echo "[INFO] Restoring remote config.yaml from GCS..."
-              gcloud storage cp "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/config.yaml" ~/.codemender/config.yaml || true
+              gcloud storage cp "gs://${CLEAN_BUCKET}/${GCS_TARGET_DIR}/config.yaml" ~/.codemender/config.yaml || true
+            elif gcloud storage ls "gs://${CLEAN_BUCKET}/config.yaml" 2>/dev/null; then
+              gcloud storage cp "gs://${CLEAN_BUCKET}/config.yaml" ~/.codemender/config.yaml || true
             fi
 
-            if gcloud storage ls "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/state.db" 2>/dev/null; then
+            if gcloud storage ls "gs://${CLEAN_BUCKET}/${GCS_TARGET_DIR}/state.db" 2>/dev/null; then
               echo "[INFO] Restoring remote state.db from GCS..."
-              gcloud storage cp "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/state.db" ~/.codemender/state.db || true
+              gcloud storage cp "gs://${CLEAN_BUCKET}/${GCS_TARGET_DIR}/state.db" ~/.codemender/state.db || true
+            elif gcloud storage ls "gs://${CLEAN_BUCKET}/state.db" 2>/dev/null; then
+              gcloud storage cp "gs://${CLEAN_BUCKET}/state.db" ~/.codemender/state.db || true
             fi
           else
-            echo "[INFO] GCS_BUCKET_NAME not configured or invalid ($GCS_BUCKET). Skipping GCS config restore."
+            echo "[INFO] GCS_BUCKET_NAME not configured or invalid ('$GCS_BUCKET'). Skipping GCS config restore."
           fi
 
           # 설정 검증
@@ -414,47 +422,70 @@ jobs:
       - name: Backup Code Mender State & Logs to GCS
         if: always()
         run: |
+          RAW_BUCKET="${GCS_BUCKET:-}"
+          CLEAN_BUCKET=$(echo "$RAW_BUCKET" | sed -e 's|^gs://||' -e 's|/*$||')
           GCS_TARGET_DIR="${GCS_CONFIG_DIR:-codemender-config}"
 
-          if [ -n "$GCS_BUCKET" ] && [ "$GCS_BUCKET" != "true" ] && [ "$GCS_BUCKET" != "false" ]; then
-            echo "=== Backing up Code Mender state & artifacts to GCS (gs://${GCS_BUCKET}/${GCS_TARGET_DIR}) ==="
+          echo "=== 6. Code Mender State Backup ==="
+          echo "Configured GCS_BUCKET: '$RAW_BUCKET'"
+          echo "Cleaned Bucket Name:   '$CLEAN_BUCKET'"
+          echo "Target Directory:      '$GCS_TARGET_DIR'"
+          echo "GitHub Run ID:         '${{ github.run_id }}'"
 
-            # 1) ~/.codemender 전체 아카이브(state.tar.gz) 압축 및 업로드
+          echo "--- Local ~/.codemender Directory Contents ---"
+          if [ -d ~/.codemender ]; then
+            ls -la ~/.codemender
+          else
+            echo "[WARN] ~/.codemender directory does not exist!"
+          fi
+
+          if [ -n "$CLEAN_BUCKET" ] && [ "$CLEAN_BUCKET" != "true" ] && [ "$CLEAN_BUCKET" != "false" ]; then
+            echo "=== Uploading state & artifacts to gs://${CLEAN_BUCKET} ==="
+
+            # 1) ~/.codemender 전체 아카이브(state.tar.gz) 압축 및 업로드 (루트 및 타겟 디렉토리 양쪽)
             if [ -d ~/.codemender ]; then
-              echo "--> Creating full ~/.codemender archive..."
+              echo "--> Creating and uploading state.tar.gz..."
               tar -czf /tmp/state.tar.gz -C ~ .codemender
-              gcloud storage cp /tmp/state.tar.gz "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/state.tar.gz" || echo "[WARN] Failed to upload state.tar.gz"
-              gcloud storage cp /tmp/state.tar.gz "gs://${GCS_BUCKET}/state.tar.gz" || true
+              gcloud storage cp /tmp/state.tar.gz "gs://${CLEAN_BUCKET}/${GCS_TARGET_DIR}/state.tar.gz" || echo "[ERROR] Failed uploading state.tar.gz to ${GCS_TARGET_DIR}"
+              gcloud storage cp /tmp/state.tar.gz "gs://${CLEAN_BUCKET}/state.tar.gz" || echo "[ERROR] Failed uploading state.tar.gz to bucket root"
             fi
 
-            # 2) 개별 state.db 직접 백업
+            # 2) 개별 state.db 직접 백업 (루트 및 타겟 디렉토리)
             if [ -f ~/.codemender/state.db ]; then
-              echo "--> Uploading state.db to GCS..."
-              gcloud storage cp ~/.codemender/state.db "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/state.db" || echo "[WARN] Failed to upload state.db"
+              echo "--> Uploading state.db..."
+              gcloud storage cp ~/.codemender/state.db "gs://${CLEAN_BUCKET}/${GCS_TARGET_DIR}/state.db" || echo "[ERROR] Failed uploading state.db to ${GCS_TARGET_DIR}"
+              gcloud storage cp ~/.codemender/state.db "gs://${CLEAN_BUCKET}/state.db" || echo "[ERROR] Failed uploading state.db to bucket root"
+            else
+              echo "[INFO] ~/.codemender/state.db not found (no scan findings persisted)."
             fi
 
             # 3) config.yaml 및 audit.log 백업
             if [ -f ~/.codemender/config.yaml ]; then
-              echo "--> Uploading config.yaml to GCS..."
-              gcloud storage cp ~/.codemender/config.yaml "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/config.yaml" || true
+              echo "--> Uploading config.yaml..."
+              gcloud storage cp ~/.codemender/config.yaml "gs://${CLEAN_BUCKET}/${GCS_TARGET_DIR}/config.yaml" || true
+              gcloud storage cp ~/.codemender/config.yaml "gs://${CLEAN_BUCKET}/config.yaml" || true
             fi
             if [ -f ~/.codemender/audit.log ]; then
-              echo "--> Uploading audit.log to GCS..."
-              gcloud storage cp ~/.codemender/audit.log "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/audit.log" || true
+              echo "--> Uploading audit.log..."
+              gcloud storage cp ~/.codemender/audit.log "gs://${CLEAN_BUCKET}/${GCS_TARGET_DIR}/audit.log" || true
+              gcloud storage cp ~/.codemender/audit.log "gs://${CLEAN_BUCKET}/audit.log" || true
             fi
 
             # 4) 실행 로그 및 아티팩트 디렉토리 백업 (Run ID 단위 격리)
             if [ -d ~/.codemender/logs ]; then
-              echo "--> Uploading logs to GCS..."
-              gcloud storage cp -r ~/.codemender/logs "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/logs/${{ github.run_id }}/" || true
+              echo "--> Uploading logs..."
+              gcloud storage cp -r ~/.codemender/logs "gs://${CLEAN_BUCKET}/${GCS_TARGET_DIR}/logs/${{ github.run_id }}/" || true
+              gcloud storage cp -r ~/.codemender/logs "gs://${CLEAN_BUCKET}/logs/${{ github.run_id }}/" || true
             fi
 
             if [ -d ~/.codemender/artifacts ]; then
-              echo "--> Uploading artifacts to GCS..."
-              gcloud storage cp -r ~/.codemender/artifacts "gs://${GCS_BUCKET}/${GCS_TARGET_DIR}/artifacts/${{ github.run_id }}/" || true
+              echo "--> Uploading artifacts..."
+              gcloud storage cp -r ~/.codemender/artifacts "gs://${CLEAN_BUCKET}/${GCS_TARGET_DIR}/artifacts/${{ github.run_id }}/" || true
+              gcloud storage cp -r ~/.codemender/artifacts "gs://${CLEAN_BUCKET}/artifacts/${{ github.run_id }}/" || true
             fi
 
             echo "[SUCCESS] GCS Backup process completed."
           else
-            echo "[INFO] GCS_BUCKET_NAME not configured or invalid ($GCS_BUCKET). Skipping GCS backup."
+            echo "[ERROR] GCS_BUCKET is empty or invalid ('$RAW_BUCKET')."
+            echo "[ACTION REQUIRED] Set 'GCS_BUCKET_NAME' in GitHub Repository Variables (Settings -> Secrets and variables -> Actions -> Variables) or Repository Secrets."
           fi
