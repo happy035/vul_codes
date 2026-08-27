@@ -1,10 +1,24 @@
 import sqlite3
 import os
-from flask import Flask, request, render_template, redirect, url_for, session, flash
+import secrets
+from flask import Flask, request, render_template, redirect, url_for, session, flash, abort
 
 app = Flask(__name__)
 app.secret_key = "super-secret-key-for-csrf-demo"
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 DB_FILE = "csrf_demo.db"
+
+
+@app.before_request
+def ensure_csrf_token():
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(32)
+
+
+@app.context_processor
+def inject_csrf_token():
+    return dict(csrf_token=session.get("csrf_token", ""))
 
 
 def init_db():
@@ -73,7 +87,9 @@ def login():
 
         user = get_user_by_username(username)
         if user and user[2] == password:
+            session.clear()
             session["username"] = username
+            session["csrf_token"] = secrets.token_hex(32)
             flash("로그인에 성공했습니다!", "success")
             return redirect(url_for("profile"))
         else:
@@ -84,7 +100,7 @@ def login():
 
 @app.route("/logout", methods=["GET"])
 def logout():
-    session.pop("username", None)
+    session.clear()
     flash("로그아웃되었습니다.", "info")
     return redirect(url_for("login"))
 
@@ -112,6 +128,10 @@ def change_password():
         flash("로그인이 필요합니다.", "warning")
         return redirect(url_for("login"))
 
+    csrf_token = request.form.get("csrf_token")
+    if not csrf_token or csrf_token != session.get("csrf_token"):
+        abort(403, description="CSRF token validation failed.")
+
     new_password = request.form.get("new_password", "").strip()
     if new_password:
         update_password(session["username"], new_password)
@@ -127,6 +147,10 @@ def change_email():
     if "username" not in session:
         flash("로그인이 필요합니다.", "warning")
         return redirect(url_for("login"))
+
+    csrf_token = request.form.get("csrf_token")
+    if not csrf_token or csrf_token != session.get("csrf_token"):
+        abort(403, description="CSRF token validation failed.")
 
     new_email = request.form.get("new_email", "").strip()
     if new_email:
