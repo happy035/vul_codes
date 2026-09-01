@@ -1,10 +1,33 @@
 import sqlite3
 import os
+import secrets
+import hmac
 from flask import Flask, request, render_template, redirect, url_for, session, flash
 
 app = Flask(__name__)
 app.secret_key = "super-secret-key-for-csrf-demo"
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 DB_FILE = "csrf_demo.db"
+
+
+def generate_csrf_token():
+    """세션에 CSRF 토큰을 생성하고 반환"""
+    if "_csrf_token" not in session:
+        session["_csrf_token"] = secrets.token_hex(32)
+    return session["_csrf_token"]
+
+
+def validate_csrf_token():
+    """요청의 CSRF 토큰과 세션 토큰을 비교 검증"""
+    token = request.form.get("csrf_token") or request.headers.get("X-CSRFToken") or ""
+    session_token = session.get("_csrf_token")
+    if not session_token or not token or not hmac.compare_digest(token, session_token):
+        return False
+    return True
+
+
+app.jinja_env.globals["csrf_token"] = generate_csrf_token
 
 
 def init_db():
@@ -74,6 +97,7 @@ def login():
         user = get_user_by_username(username)
         if user and user[2] == password:
             session["username"] = username
+            generate_csrf_token()
             flash("로그인에 성공했습니다!", "success")
             return redirect(url_for("profile"))
         else:
@@ -85,6 +109,7 @@ def login():
 @app.route("/logout", methods=["GET"])
 def logout():
     session.pop("username", None)
+    session.pop("_csrf_token", None)
     flash("로그아웃되었습니다.", "info")
     return redirect(url_for("login"))
 
@@ -100,17 +125,18 @@ def profile():
 
 
 # ==============================================================================
-# [CWE-352: Cross-Site Request Forgery (CSRF) 취약점 발생 지점]
-# CSRF 토큰(Anti-CSRF Token) 검증 없이 오직 세션 쿠키(session["username"])만으로
-# 비밀번호 변경 요청을 승인합니다.
-# 공격자는 피해자가 로그인된 상태에서 악성 사이트를 방문하도록 유도하여,
-# 피해자의 브라우저를 통해 백그라운드에서 비밀번호 변경 요청을 강제로 전송할 수 있습니다.
+# [CWE-352: Cross-Site Request Forgery (CSRF) 보호 적용 지점]
+# CSRF 토큰(Anti-CSRF Token)을 검증하여 요청이 적법한 출처에서 시작되었는지 확인합니다.
 # ==============================================================================
 @app.route("/change-password", methods=["POST"])
 def change_password():
     if "username" not in session:
         flash("로그인이 필요합니다.", "warning")
         return redirect(url_for("login"))
+
+    if not validate_csrf_token():
+        flash("유효하지 않은 CSRF 토큰입니다.", "danger")
+        return redirect(url_for("profile"))
 
     new_password = request.form.get("new_password", "").strip()
     if new_password:
@@ -127,6 +153,10 @@ def change_email():
     if "username" not in session:
         flash("로그인이 필요합니다.", "warning")
         return redirect(url_for("login"))
+
+    if not validate_csrf_token():
+        flash("유효하지 않은 CSRF 토큰입니다.", "danger")
+        return redirect(url_for("profile"))
 
     new_email = request.form.get("new_email", "").strip()
     if new_email:

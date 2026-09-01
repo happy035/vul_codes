@@ -60,11 +60,11 @@
             </div>
         </div>
 
-        <!-- 비밀번호 변경 폼 (CSRF 취약: Anti-CSRF 토큰 누락) -->
+        <!-- 비밀번호 변경 폼 (CSRF 방어 적용) -->
         <div class="card">
-            <h3>🔑 비밀번호 변경 (CWE-352 취약)</h3>
+            <h3>🔑 비밀번호 변경</h3>
             <form action="/change-password" method="POST">
-                <!-- 취약점: <input type="hidden" name="csrf_token" value="..."> 이 없음 -->
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="form-group">
                     <label for="new_password">새 비밀번호</label>
                     <input type="password" id="new_password" name="new_password" placeholder="변경할 새 비밀번호 입력" required>
@@ -73,10 +73,11 @@
             </form>
         </div>
 
-        <!-- 이메일 변경 폼 (CSRF 취약) -->
+        <!-- 이메일 변경 폼 (CSRF 방어 적용) -->
         <div class="card">
-            <h3>📧 이메일 변경 (CWE-352 취약)</h3>
+            <h3>📧 이메일 변경</h3>
             <form action="/change-email" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="form-group">
                     <label for="new_email">새 이메일 주소</label>
                     <input type="email" id="new_email" name="new_email" placeholder="변경할 이메일 주소 입력" required>
