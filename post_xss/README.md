@@ -20,7 +20,7 @@ pip install -r requirements.txt
 ```bash
 python app.py
 ```
-웹 브라우저에서 `http://127.0.0.1:7000` 또는 `http://127.0.0.1:7000/post`에 접속합니다.
+웹 브라우저에서 `http://127.0.0.1:8000` 또는 `http://127.0.0.1:8000/post`에 접속합니다.
 
 ## 테스트 시나리오
 
