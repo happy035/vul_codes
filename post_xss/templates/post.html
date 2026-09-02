@@ -46,8 +46,8 @@
     <script>
         // 저장된 글의 내용을 브라우저 메시지 박스(Alert / MsgBox)로 출력
         // 취약점: 사용자 입력을 필터링 없이 그대로 스크립트 문맥에 출력 (Reflected / DOM XSS 유발 가능)
-        const savedTitle = "{{ last_saved.title | safe }}";
-        const savedContent = "{{ last_saved.content | safe }}";
+        const savedTitle = {{ last_saved.title | tojson }};
+        const savedContent = {{ last_saved.content | tojson }};
         alert("[게시글 저장 완료]\n제목: " + savedTitle + "\n내용: " + savedContent);
     </script>
     {% endif %}
@@ -87,12 +87,12 @@
                 <div class="list-group-item py-3">
                     <div class="d-flex justify-content-between align-items-center mb-1">
                         <!-- VULNERABLE: 제목(post[1])을 escape 없이 렌더링 (| safe) -->
-                        <h6 class="fw-bold mb-0 text-primary">{{ post[1] | safe }}</h6>
+                        <h6 class="fw-bold mb-0 text-primary">{{ post[1] }}</h6>
                         <small class="text-muted">{{ post[3] }}</small>
                     </div>
                     <!-- VULNERABLE: 내용(post[2])을 escape 없이 렌더링 (| safe) -> Stored XSS 실행 -->
                     <div class="post-content-box mt-2">
-                        {{ post[2] | safe }}
+                        {{ post[2] }}
                     </div>
                 </div>
                 {% endfor %}
