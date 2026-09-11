@@ -81,6 +81,6 @@ def create_post():
 
 if __name__ == "__main__":
     init_db()
-    print("Starting Flask XSS Demo application on http://127.0.0.1:7000")
+    print("Starting Flask XSS Demo application on http://127.0.0.1:10000")
     print("XSS Payload Example: <script>alert('XSS Attack Succeeded!')</script>")
-    app.run(host="0.0.0.0", port=7000, debug=True)
+    app.run(host="0.0.0.0", port=10000, debug=True)
