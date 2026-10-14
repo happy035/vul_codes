@@ -101,18 +101,18 @@ def profile():
 
 # ==============================================================================
 # [CWE-352: Cross-Site Request Forgery (CSRF) 취약점 발생 지점]
-# CSRF 토큰(Anti-CSRF Token) 검증 없이 오직 세션 쿠키(session["username"])만으로
-# 비밀번호 변경 요청을 승인합니다.
-# 공격자는 피해자가 로그인된 상태에서 악성 사이트를 방문하도록 유도하여,
-# 피해자의 브라우저를 통해 백그라운드에서 비밀번호 변경 요청을 강제로 전송할 수 있습니다.
+# 1. Anti-CSRF 토큰(CSRF Token) 검증 메커니즘이 전혀 구현되어 있지 않습니다.
+# 2. GET 메소드를 통해서도 비밀번호/이메일 변경과 같은 주요 상태 변경(State-changing)을 허용합니다.
+# 3. 브라우저의 기본 세션 쿠키 전송 메커니즘을 맹신하여 외부 악성 사이트로부터의 위조 요청을 방어하지 못합니다.
 # ==============================================================================
-@app.route("/change-password", methods=["POST"])
+@app.route("/change-password", methods=["GET", "POST"])
 def change_password():
     if "username" not in session:
         flash("로그인이 필요합니다.", "warning")
         return redirect(url_for("login"))
 
-    new_password = request.form.get("new_password", "").strip()
+    # VULNERABLE: GET 또는 POST 파라미터(request.values)로 비밀번호를 직접 변경 (CSRF 토큰 미검증)
+    new_password = request.values.get("new_password", "").strip()
     if new_password:
         update_password(session["username"], new_password)
         flash(f"비밀번호가 성공적으로 변경되었습니다! (새 비밀번호: {new_password})", "success")
@@ -122,13 +122,14 @@ def change_password():
     return redirect(url_for("profile"))
 
 
-@app.route("/change-email", methods=["POST"])
+@app.route("/change-email", methods=["GET", "POST"])
 def change_email():
     if "username" not in session:
         flash("로그인이 필요합니다.", "warning")
         return redirect(url_for("login"))
 
-    new_email = request.form.get("new_email", "").strip()
+    # VULNERABLE: GET 또는 POST 파라미터(request.values)로 이메일을 직접 변경 (CSRF 토큰 미검증)
+    new_email = request.values.get("new_email", "").strip()
     if new_email:
         update_email(session["username"], new_email)
         flash(f"이메일이 성공적으로 변경되었습니다! (새 이메일: {new_email})", "success")

@@ -40,7 +40,7 @@ def authenticate_user_vulnerable(username, password):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
 
-    # VULNERABLE: 직접 문자열 연결을 통한 SQL 생성
+    # VULNERABLE: 직접 문자열 연결을 통한 SQL 생성 (CWE-89)
     query = f"SELECT * FROM users WHERE username = '{username}' AND password = '{password}'"
     print(f"[*] Executing Raw SQL Query: {query}")
 
@@ -66,9 +66,14 @@ def authenticate_user_secure(username, password):
 
     # SECURE: 파라미터 바인딩 적용
     query = "SELECT * FROM users WHERE username = ? AND password = ?"
-    cursor.execute(query, (username, password))
-    user = cursor.fetchone()
-    conn.close()
+    try:
+        cursor.execute(query, (username, password))
+        user = cursor.fetchone()
+    except sqlite3.Error as e:
+        print(f"[!] Database Error: {e}")
+        user = None
+    finally:
+        conn.close()
 
     return user, query
 
@@ -83,7 +88,7 @@ def login():
     username = request.form.get("username", "")
     password = request.form.get("password", "")
 
-    # 취약한 인증 함수 호출
+    # 취약한 인증 함수 호출 (CWE-89 SQL Injection)
     user, executed_query = authenticate_user_vulnerable(username, password)
 
     if user:

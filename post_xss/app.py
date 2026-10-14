@@ -1,6 +1,6 @@
 import sqlite3
 import os
-from flask import Flask, request, render_template
+from flask import Flask, request, render_template, render_template_string
 
 app = Flask(__name__)
 DB_FILE = "posts.db"
@@ -77,6 +77,36 @@ def create_post():
 
     posts = get_all_posts()
     return render_template("post.html", posts=posts, last_saved=last_saved)
+
+
+@app.route("/search", methods=["GET"])
+def search():
+    """
+    [CWE-79: Reflected Cross-Site Scripting (XSS) 취약점 발생 지점]
+    사용자 입력값(keyword)을 HTML 이스케이프(Escape) 없이 render_template_string을 통해
+    직접 템플릿에 결합하여 반환하므로 Reflected XSS 취약점이 발생합니다.
+    """
+    keyword = request.args.get("keyword", "")
+    template = f"""
+    <!DOCTYPE html>
+    <html lang="ko">
+    <head>
+        <meta charset="UTF-8">
+        <title>Search Results</title>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    </head>
+    <body class="p-5 bg-light">
+        <div class="container" style="max-width: 600px;">
+            <div class="card p-4">
+                <h4 class="mb-3">🔍 검색 결과: {keyword}</h4>
+                <p class="text-muted">'{keyword}'에 대한 검색 결과를 찾을 수 없습니다.</p>
+                <a href="/post" class="btn btn-secondary mt-2">← 게시판으로 돌아가기</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return render_template_string(template)
 
 
 if __name__ == "__main__":

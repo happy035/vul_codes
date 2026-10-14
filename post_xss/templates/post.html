@@ -68,6 +68,15 @@
         </form>
     </div>
 
+    <!-- 게시글 검색 카드 (Reflected XSS 취약점 테스트) -->
+    <div class="card p-4 mb-4">
+        <h5 class="card-title fw-bold mb-3">🔍 게시글 검색 (Reflected XSS 테스트)</h5>
+        <form action="/search" method="GET" class="d-flex gap-2">
+            <input type="text" class="form-control" name="keyword" placeholder="검색어를 입력하세요 (예: <script>alert(1)</script>)" required>
+            <button type="submit" class="btn btn-outline-primary fw-semibold text-nowrap">검색</button>
+        </form>
+    </div>
+
     <!-- XSS 공격 페이로드 가이드 -->
     <div class="card p-3 mb-4 bg-light border">
         <h6 class="fw-bold text-danger mb-2">💡 XSS 공격 페이로드 예시:</h6>
